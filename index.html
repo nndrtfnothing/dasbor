@@ -433,6 +433,34 @@ h1,h2,h3,h4{font-weight:600;letter-spacing:-.015em}
 .brk span{color:rgba(255,255,255,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brk b{color:#fff;font-weight:600}
 
+/* ===== Beranda: kartu intip per halaman ===== */
+.peek-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+.peek-grid .peek:nth-child(4){grid-column:span 2}
+.peek .card-h{margin-bottom:10px}
+.peek .card-h h3{font-size:1rem}
+.mini2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mini2 .v{font-family:var(--f-display);font-size:1.25rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.wday{border:0;background:var(--surface-2);border-radius:12px;padding:6px 0 7px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;color:var(--fg)}
+.wday span{font-size:10.5px;color:var(--muted);font-weight:600}
+.wday b{font-size:15px;font-weight:600}
+.wday i{display:flex;gap:2px;height:5px;font-style:normal}
+.wday em{width:5px;height:5px;border-radius:50%;display:block}
+.wday em.e{background:var(--accent)} .wday em.t{background:var(--warn)}
+.wday.on{background:var(--grad);color:#fff}
+.wday.on span{color:rgba(255,255,255,.85)} .wday.on em.e,.wday.on em.t{background:#fff}
+.evline{display:flex;align-items:center;gap:9px;border:0;background:none;padding:6px 4px;border-radius:10px;cursor:pointer;text-align:left;color:var(--fg);width:100%;min-width:0}
+.evline:hover{background:var(--surface-2)}
+.evline .tm{font-weight:600;font-size:13px;width:42px;flex:none}
+.evline .tx{display:flex;flex-direction:column;min-width:0;flex:1}
+.evline .tx b{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evline .tx small{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:1100px){.peek-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.peek-grid .peek:nth-child(4){grid-column:auto}}
+@media (max-width:860px){.peek-grid{grid-template-columns:minmax(0,1fr)}}
+.peek .li .acts{display:none}
+.peek .li{padding:8px 2px}
+.peek .li .s .pill{font-size:10.5px;padding:1px 7px}
+
 </style>
 <script>
 /* pustaka pihak ketiga dimuat dengan sumber cadangan; aplikasi tetap jalan tanpa keduanya */
@@ -2793,7 +2821,7 @@ Actions.calNav = (el) => {
   else UICal.cursor = D.add(c, 30 * n);
   App.render();
 };
-Actions.calGoDay = (el) => { UICal.cursor = el.dataset.date; UICal.view = 'day'; App.render(); };
+Actions.calGoDay = (el) => { UICal.cursor = el.dataset.date; UICal.view = 'day'; if (el.dataset.gocal) App.go('kalender'); else App.render(); };
 Actions.calToggle = (el) => { UICal.show[el.dataset.k] = !UICal.show[el.dataset.k]; App.render(); };
 document.addEventListener('change', (e) => { if (e.target.dataset?.calFilter) { UICal[e.target.dataset.calFilter] = e.target.value; App.render(); } });
 document.addEventListener('input', (e) => { if (e.target.dataset?.calFilter === 'q') { UICal.q = e.target.value; clearTimeout(UICal._t); UICal._t = setTimeout(() => { App.render(); const s = $('[data-cal-filter=q]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 250); } });
@@ -2938,59 +2966,74 @@ function renderDashboard(root) {
 
   const demoBanner = s.transactions.some((t) => t.demo) || s.accounts.some((a) => a.demo) || s.tasks.some((t) => t.demo) ? `<div class="banner warn">${icon('info', 'ico-sm')}<span>Sebagian data adalah <b>DEMO</b> (contoh, bukan data Anda). Hapus kapan saja tanpa menyentuh data pribadi.</span><span class="spacer"></span><button class="btn sm" data-act="clearDemo">Hapus data demo</button></div>` : '';
 
+  const f = s.settings.savePlan ? Fin.freeSavings() : null;
+  const head = (ic, title, page, sub = '') => `<div class="card-h"><h3>${icon(ic, 'ico-sm')} ${title}</h3><div class="row">${sub ? `<span class="sub">${sub}</span>` : ''}<button class="btn sm ghost" data-goto="${page}">Buka →</button></div></div>`;
+  // strip 7 hari: titik kegiatan & tugas
+  const ws = D.weekStart(today);
+  const week = D.range(ws, D.add(ws, 6)).map((d) => {
+    const ev = S().events.filter((e) => occursOn(e.date, e.rec, d) && e.status !== 'cancelled').length;
+    const tk = Tasks.on(d).filter((i) => !i.done).length;
+    return `<button class="wday ${d === today ? 'on' : ''}" data-act="calGoDay" data-date="${d}" data-gocal="1" aria-label="${D.long(d)}: ${ev} kegiatan, ${tk} tugas"><span>${D.wd(d)}</span><b>${Number(d.slice(8))}</b><i>${'<em class="e"></em>'.repeat(Math.min(ev, 3))}${'<em class="t"></em>'.repeat(Math.min(tk, 3))}</i></button>`;
+  }).join('');
+  const evTodayList = Cal.next(20).filter((x) => x.date === today);
+  const nextOther = Cal.next(4).filter((x) => x.date !== today).slice(0, Math.max(1, 3 - evTodayList.length));
+  const evLine = (x) => `<button class="evline" data-act="editEvent" data-id="${x.e.id}" data-date="${x.date}"><span class="tm num">${x.e.allDay ? 'Hari' : x.e.start}</span><span class="swatch" style="background:${Cat.color('event', x.e.categoryId)}"></span><span class="tx"><b>${esc(x.e.title)}</b>${x.e.location ? `<small>${esc(x.e.location)}</small>` : ''}</span>${x.date !== today ? `<span class="pill">${D.rel(x.date)}</span>` : ''}</button>`;
+
+  const shopNeed = s.shopping.filter((x) => x.status !== 'bought');
+  const restockDueList = s.restock.filter(restockDue);
+  const hc = houseCat();
+  const choresToday = Tasks.on(today).filter((i) => i.t.categoryId === hc);
+  const nextDl = Proj.nextDeadlines(30)[0];
+
   root.innerHTML = `
   ${onboarding}
   ${demoBanner}
   <div class="hello"><div class="small muted">${D.long(today)} · WIB</div><h1>${greeting()}${nameBit}</h1><div class="today-strip">${summaryBits}</div></div>
   <div class="quick">
-    <button class="btn" data-act="addTx" data-type="expense">${icon('arrowout', 'ico-sm')} Pengeluaran</button>
-    <button class="btn" data-act="addTx" data-type="income">${icon('arrowin', 'ico-sm')} Pemasukan</button>
     <button class="btn" data-act="addTask">${icon('check', 'ico-sm')} Tugas</button>
     <button class="btn" data-act="addEvent" data-date="${today}">${icon('cal', 'ico-sm')} Kegiatan</button>
-    <button class="btn" data-act="editGoal">${icon('target', 'ico-sm')} Target tabungan</button>
+    <button class="btn" data-act="addTx" data-type="expense">${icon('arrowout', 'ico-sm')} Pengeluaran</button>
+    <button class="btn" data-act="addTx" data-type="income">${icon('arrowin', 'ico-sm')} Pemasukan</button>
+    <button class="btn" data-act="editShop">${icon('cart', 'ico-sm')} Belanja</button>
   </div>
-  ${noFin ? `<div class="card flat">${empty('wallet', 'Keuangan belum diatur', 'Tambahkan akun (tunai, bank, e-wallet, tabungan) dan saldo awalnya agar ringkasan keuangan terisi.', `<button class="btn primary" data-act="editAccount">Tambah akun</button>`)}</div>` : `
-  <div class="stats-band">
-    <div class="stat"><span class="label">Aset likuid (siap pakai)</span><span class="v lg num">${rp(totals.spendable)}</span><span class="hint">Total aset ${rp(totals.total)}${totals.receivable ? ` · ${rp(totals.receivable)} di orang lain` : ''}</span>${accBreakdown('spendable')}</div>
-    ${savingsStat()}
-    <div class="stat"><span class="label">Pemasukan bulan ini</span><span class="v num pos">${rp(flows.inc)}</span><span class="hint">${D.monthName(key)}</span></div>
-    <div class="stat"><span class="label">Pengeluaran bulan ini</span><span class="v num neg">${rp(flows.exp)}</span><span class="hint">selisih ${rp(flows.net, { sign: true })}</span></div>
-  </div>
-  <div class="grid g3">
-    <div class="card"><div class="label">Sisa anggaran bulan ini</div>${bud.totalBudget ? `<div class="stat"><span class="v num ${bud.totalBudget - bud.totalUsed < 0 ? 'neg' : ''}">${rp(bud.totalBudget - bud.totalUsed)}</span><span class="hint">dari ${rp(bud.totalBudget)} · terpakai ${Math.round((bud.totalUsed / bud.totalBudget) * 100)}%</span></div><div class="bar ${barTone(bud.totalUsed / bud.totalBudget)}" style="margin-top:8px"><i style="width:${clamp((bud.totalUsed / bud.totalBudget) * 100, 0, 100)}%"></i></div>` : `<p class="small muted" style="margin-top:6px">Belum ada budget. <button class="btn sm ghost" data-act="editBudgets">Atur</button></p>`}</div>
-    <div class="card"><div class="label">Proyeksi saldo akhir bulan</div><div class="stat"><span class="v num ${pr.patternEnd < 0 ? 'neg' : ''}">${rp(pr.limited ? pr.planEnd : pr.patternEnd)}</span><span class="hint">${pr.limited ? 'hanya dari rencana — data pola masih terbatas' : `rencana + rata-rata ${rpShort(pr.avg)}/hari`} · ${pr.remaining} hari lagi</span></div><button class="btn sm ghost" style="margin-top:6px;padding-left:0" data-goto="keuangan" data-tab="proyeksi">Lihat asumsi →</button></div>
-    <div class="card"><div class="label">Tagihan 7 hari ke depan</div>${billsSoon.length ? `<div class="list">${billsSoon.slice(0, 3).map((o) => `<div class="li" style="padding:6px 0"><div class="main-col"><div class="t small">${esc(o.p.title)}</div><div class="s">${o.status === 'overdue' ? '<span class="pill bad">Lewat</span>' : D.rel(o.date)}</div></div><b class="num small">${rp(o.p.amount)}</b><button class="btn sm" data-act="payPlanned" data-id="${o.p.id}" data-occ="${o.date}">Bayar</button></div>`).join('')}</div>` : '<p class="small muted" style="margin-top:6px">Tidak ada tagihan dekat.</p>'}</div>
-  </div>
-  <div class="grid g2">${checkCard(true)}${freeSavingsCard()}</div>`}
-  <div class="grid g3">
-    <div class="card span2"><div class="card-h"><h3>To-do hari ini</h3><div class="row"><span class="small muted">${doneToday}/${todayInst.length}</span><button class="btn sm" data-goto="planner">Planner</button></div></div>
-      ${todayInst.length ? `<div class="bar ${doneToday === todayInst.length ? 'good' : ''}" style="margin-bottom:8px"><i style="width:${(doneToday / todayInst.length) * 100}%"></i></div><div class="list">${todayInst.slice(0, 8).map((i) => taskRow(i)).join('')}</div>${todayInst.length > 8 ? `<button class="btn sm ghost" data-goto="planner">+${todayInst.length - 8} lainnya</button>` : ''}` : empty('check', 'Belum ada tugas hari ini', 'Tambahkan dengan tombol Tugas di atas.')}
-      ${overdue.length ? `<div class="banner bad" style="margin-top:10px">${icon('alert', 'ico-sm')}<span><b>${overdue.length}</b> tugas terlambat belum selesai.</span><span class="spacer"></span><button class="btn sm" data-goto="planner">Jadwalkan ulang</button></div>` : ''}
+  <div class="peek-grid">
+    <div class="card peek">${head('list', 'Planner hari ini', 'planner', `${doneToday}/${todayInst.length} selesai`)}
+      <div class="bar ${todayInst.length && doneToday === todayInst.length ? 'good' : ''}" style="margin-bottom:6px"><i style="width:${todayInst.length ? (doneToday / todayInst.length) * 100 : 0}%"></i></div>
+      ${todayInst.length ? `<div class="list">${todayInst.slice(0, 5).map((i) => taskRow(i)).join('')}</div>${todayInst.length > 5 ? `<button class="btn sm ghost" data-goto="planner">+${todayInst.length - 5} lainnya</button>` : ''}` : `<p class="small muted">Belum ada tugas hari ini.</p>`}
+      ${overdue.length ? `<button class="banner bad" data-goto="planner" style="border:0;cursor:pointer;text-align:left;margin-top:8px">${icon('alert', 'ico-sm')}<span><b>${overdue.length}</b> tugas terlambat — jadwalkan ulang</span></button>` : ''}
+      ${soon.length ? `<div class="xs muted" style="margin-top:8px">Deadline dekat: ${soon.slice(0, 2).map((t) => `<b>${esc(t.title)}</b> (${D.rel(t.deadline)})`).join(', ')}</div>` : ''}
     </div>
-    <div class="card"><div class="card-h"><h3>Kegiatan berikutnya</h3><button class="btn sm" data-goto="kalender">Kalender</button></div>
-      ${nextEv.length ? `<div class="stack">${nextEv.map((x, idx) => `<button class="next-ev btn ghost" style="justify-content:flex-start;padding:6px;text-align:left;white-space:normal" data-act="editEvent" data-id="${x.e.id}" data-date="${x.date}">
-        <div style="min-width:64px"><div class="time" style="${idx ? 'font-size:1.05rem' : ''}">${x.e.allDay ? 'Hari' : x.e.start}</div><div class="xs muted">${D.rel(x.date)}</div></div>
-        <div style="min-width:0"><div style="font-weight:650">${Cat.dot('event', x.e.categoryId)} ${esc(x.e.title)}</div><div class="xs muted">${esc(x.e.location || Cat.name('event', x.e.categoryId))}</div></div></button>`).join('')}</div>` : empty('cal', 'Tidak ada kegiatan', '60 hari ke depan kosong.')}
+    <div class="card peek">${head('cal', 'Kalender', 'kalender', D.fmt(today, { month: 'long' }))}
+      <div class="week">${week}</div>
+      <div class="stack" style="gap:4px;margin-top:10px">
+        ${evTodayList.length ? evTodayList.slice(0, 3).map(evLine).join('') : `<p class="small muted">Tidak ada kegiatan lagi hari ini.</p>`}
+        ${nextOther.length ? `<div class="label" style="margin-top:6px">Berikutnya</div>${nextOther.map(evLine).join('')}` : ''}
+      </div>
     </div>
-  </div>
-  <div class="grid g2">
-    <div class="card"><div class="card-h"><h3>Tugas mendekati deadline</h3><span class="sub">${open.length} belum selesai</span></div>
-      ${soon.length ? `<div class="list">${soon.map((t) => taskRow({ t, date: t.date, done: false }, { showDate: !!t.date })).join('')}</div>` : '<p class="small muted">Tidak ada deadline dalam 3 hari.</p>'}
+    <div class="card peek">${head('wallet', 'Keuangan', 'keuangan', D.monthName(key))}
+      ${noFin ? empty('wallet', 'Belum diatur', 'Tambahkan akun dan saldo.', `<button class="btn sm primary" data-act="editAccount">Tambah akun</button>`) : `
+      <div class="mini2">
+        <div><div class="label">Siap pakai</div><div class="v num">${rp(totals.spendable)}</div></div>
+        <div><div class="label">Tabungan</div><div class="v num">${rp(f ? f.main : totals.savings)}</div></div>
+      </div>
+      <div class="row between small" style="margin-top:10px"><span class="muted">Keluar bulan ini</span><b class="num">${rp(flows.exp)}${bud.totalBudget ? ` <span class="muted" style="font-weight:500">/ ${rp(bud.totalBudget)}</span>` : ''}</b></div>
+      ${bud.totalBudget ? `<div class="bar ${barTone(bud.totalUsed / bud.totalBudget)}" style="margin-top:6px"><i style="width:${clamp((bud.totalUsed / bud.totalBudget) * 100, 0, 100)}%"></i></div>` : ''}
+      <div class="row between small" style="margin-top:8px"><span class="muted">Hari ini keluar</span><b class="num">${rp(Fin.flows(today, today).exp)}</b></div>
+      ${billsSoon.length ? `<div class="row between small" style="margin-top:8px"><span class="muted">${icon('bell', 'ico-sm')} ${esc(billsSoon[0].p.title)} · ${billsSoon[0].status === 'overdue' ? 'lewat' : D.rel(billsSoon[0].date)}</span><button class="btn sm" data-act="payPlanned" data-id="${billsSoon[0].p.id}" data-occ="${billsSoon[0].date}">Bayar ${rpShort(billsSoon[0].p.amount)}</button></div>` : ''}
+      <button class="btn sm primary" style="margin-top:12px" data-act="addTx" data-type="expense">${icon('plus', 'ico-sm')} Catat pengeluaran</button>`}
     </div>
-    <div class="card"><div class="card-h"><h3>Progres akademik</h3><button class="btn sm" data-goto="akademik">Proyek</button></div>
-      ${projects.length ? `<div class="list">${projects.slice(0, 5).map((p) => { const pc = Proj.progress(p); const nx = (p.milestones || []).filter((m) => m.status !== 'done' && m.date).sort((a, b) => (a.date < b.date ? -1 : 1))[0]; return `<div class="li" style="cursor:pointer" data-act="openProject" data-id="${p.id}"><div class="main-col"><div class="row between"><span class="t">${esc(p.name)}</span><b class="small">${Math.round(pc * 100)}%</b></div><div class="bar thin" style="margin:6px 0"><i style="width:${pc * 100}%"></i></div><div class="s">${nx ? `Berikutnya: ${esc(nx.title)} · ${D.rel(nx.date)}` : p.deadline ? 'Deadline ' + D.fmt(p.deadline) : ''}</div></div></div>`; }).join('')}</div>` : empty('book', 'Belum ada proyek', 'Kelola TA dan tugas kuliah di halaman Akademik.', `<button class="btn sm" data-act="editProject">Buat proyek</button>`)}
+    <div class="card peek">${head('book', 'Akademik & TA', 'akademik')}
+      ${projects.length ? `<div class="list">${projects.slice(0, 3).map((p) => { const pc = Proj.progress(p); return `<div class="li" style="cursor:pointer;padding:8px 2px" data-act="openProject" data-id="${p.id}"><div class="main-col"><div class="row between"><span class="t small">${esc(p.name)}</span><b class="small">${Math.round(pc * 100)}%</b></div><div class="bar thin" style="margin-top:6px"><i style="width:${pc * 100}%"></i></div></div></div>`; }).join('')}</div>
+      ${nextDl ? `<div class="xs muted" style="margin-top:8px">${icon('flag', 'ico-sm')} ${nextDl.late ? '<b class="neg">Terlambat</b>' : 'Berikutnya'}: <b>${esc(nextDl.title)}</b> · ${D.rel(nextDl.date)}</div>` : ''}` : empty('book', 'Belum ada proyek', 'Kelola TA dan tugas kuliah.', `<button class="btn sm" data-act="editProject">Buat proyek</button>`)}
     </div>
-  </div>
-  ${noFin ? '' : `<div class="grid g2">
-    <div class="card"><div class="card-h"><h3>Pengeluaran per kategori</h3><span class="sub">${D.monthName(key)}</span></div>${catChartBlock('chDashCat', key)}</div>
-    <div class="card"><div class="card-h"><h3>Pemasukan & pengeluaran per bulan</h3><span class="sub">6 bulan</span></div><div class="chart-box"><canvas id="chDashTrend"></canvas></div></div>
-  </div>`}`;
-  if (!noFin) {
-    drawCatChart('chDashCat', key);
-    const months = []; for (let i = 5; i >= 0; i--) months.push(D.addMonths(key + '-01', -i).slice(0, 7));
-    const fl = months.map((m) => Fin.monthFlows(m));
-    mkChart('chDashTrend', { type: 'bar', data: { labels: months.map((m) => D.fmt(m + '-01', { month: 'short' })), datasets: [{ label: 'Pemasukan', data: fl.map((f) => f.inc), backgroundColor: cssVar('--sage'), borderRadius: 4, maxBarThickness: 26 }, { label: 'Pengeluaran', data: fl.map((f) => f.exp), backgroundColor: cssVar('--line-strong'), borderRadius: 4, maxBarThickness: 26 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } }, tooltip: { callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + rp(c.parsed.y) } } }, scales: { x: { grid: { display: false } }, y: { ticks: { callback: (v) => rpShort(v) } } } } });
-  }
+    <div class="card peek">${head('house', 'Rumah', 'rumah')}
+      <div class="mini2">
+        <div><div class="label">Daftar belanja</div><div class="v">${shopNeed.length}</div><div class="xs muted">${shopNeed.length ? '±' + rp(sum(shopNeed, (x) => x.est)) : 'kosong'}</div></div>
+        <div><div class="label">Perlu isi ulang</div><div class="v ${restockDueList.length ? 'neg' : ''}">${restockDueList.length}</div><div class="xs muted">${restockDueList.slice(0, 2).map((r) => esc(r.name)).join(', ') || 'aman'}</div></div>
+      </div>
+      ${choresToday.length ? `<div class="list" style="margin-top:8px">${choresToday.slice(0, 3).map((i) => taskRow(i)).join('')}</div>` : `<p class="xs muted" style="margin-top:10px">Tidak ada pekerjaan rumah hari ini.</p>`}
+    </div>
+  </div>`;
 }
 Actions.startEmpty = () => { Store.update((s) => (s.settings.onboarded = true)); toast('Siap. Mulai dengan menambah akun atau tugas pertama.'); };
 
