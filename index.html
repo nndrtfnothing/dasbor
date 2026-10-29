@@ -1547,7 +1547,7 @@ Actions.allocGoal = (el) => {
 /* =========================================================
    FINANCE VIEW
    ========================================================= */
-const UIFin = { tab: 'ringkasan', month: null, q: '', fAcc: '', fCat: '', fType: '', fFrom: '', fTo: '', sort: 'date-desc', limit: 150, repMonth: null, summary: 'month' };
+const UIFin = { selMode: false, sel: new Set(), tab: 'ringkasan', month: null, q: '', fAcc: '', fCat: '', fType: '', fFrom: '', fTo: '', sort: 'date-desc', limit: 150, repMonth: null, summary: 'month' };
 const FIN_TABS = [['ringkasan', 'Ringkasan'], ['transaksi', 'Transaksi'], ['akun', 'Akun'], ['budget', 'Budget'], ['proyeksi', 'Proyeksi'], ['tagihan', 'Tagihan & rencana'], ['target', 'Target'], ['laporan', 'Laporan']];
 
 Actions.finTab = (el) => { UIFin.tab = el.dataset.tab; App.render(); };
@@ -1628,7 +1628,8 @@ function txRow(t) {
   const ic = isT ? 'swap' : t.type === 'income' ? 'arrowin' : 'arrowout';
   const color = isT ? 'var(--info)' : Cat.color(t.type === 'income' ? 'income' : 'expense', t.categoryId);
   const title = t.desc || (isT ? 'Transfer' : Cat.name(t.type === 'income' ? 'income' : 'expense', t.categoryId));
-  return `<div class="li">
+  const selBox = UIFin.selMode ? `<input type="checkbox" class="txsel" data-txsel="${t.id}" ${UIFin.sel.has(t.id) ? 'checked' : ''} aria-label="Pilih transaksi" style="width:18px;height:18px;accent-color:var(--accent);flex:none">` : '';
+  return `<div class="li">${selBox}
     <div class="ic-circle" style="color:${color};background:color-mix(in srgb,${color} 16%,transparent)">${icon(ic, 'ico-sm')}</div>
     <div class="main-col"><div class="t">${esc(title)}${demoTag(t)}${t.adjust ? ' <span class="pill">Penyesuaian</span>' : ''}${t.source?.kind === 'planned' ? ' <span class="pill info">Tagihan</span>' : ''}${t.source?.kind === 'shopping' ? ' <span class="pill info">Belanja</span>' : ''}</div>
       <div class="s"><span>${D.fmt(t.date)}</span><span>${isT ? `${esc(Fin.accName(t.accountId))} → ${esc(Fin.accName(t.toAccountId))}` : esc(Cat.name(t.type === 'income' ? 'income' : 'expense', t.categoryId)) + ' · ' + esc(Fin.accName(t.accountId))}</span>${t.note ? `<span>· ${esc(t.note)}</span>` : ''}</div></div>
@@ -1682,7 +1683,7 @@ function finTransactions(el) {
       ${UIFin.q || UIFin.fType || UIFin.fAcc || UIFin.fCat || UIFin.fFrom || UIFin.fTo ? `<button class="btn sm ghost" data-act="finClearFilter">Reset filter</button>` : ''}
     </div>
     <div class="row between"><span class="small muted">${list.length} transaksi · masuk <b class="pos num">${rp(fl.inc)}</b> · keluar <b class="neg num">${rp(fl.exp)}</b></span>
-      <div class="row"><button class="btn sm" data-act="exportTx" data-fmt="csv">${icon('down', 'ico-sm')} CSV</button><button class="btn sm" data-act="exportTx" data-fmt="xlsx">${icon('down', 'ico-sm')} Excel</button><button class="btn sm" data-act="importExcel">${icon('upload', 'ico-sm')} Impor Excel</button><button class="btn sm primary" data-act="addTx">${icon('plus', 'ico-sm')} Catat</button></div></div>
+      <div class="row">${UIFin.selMode ? `<button class="btn sm" data-act="txSelAll">Pilih semua yang tampil (${list.length})</button><button class="btn sm danger solid" data-act="txDelSel" ${UIFin.sel.size ? '' : 'disabled'}>${icon('trash', 'ico-sm')} Hapus ${UIFin.sel.size || ''}</button><button class="btn sm ghost" data-act="txSelMode">Selesai</button>` : `<button class="btn sm" data-act="txSelMode">${icon('check', 'ico-sm')} Pilih</button>`}<button class="btn sm" data-act="exportTx" data-fmt="csv">${icon('down', 'ico-sm')} CSV</button><button class="btn sm" data-act="exportTx" data-fmt="xlsx">${icon('down', 'ico-sm')} Excel</button><button class="btn sm" data-act="importExcel">${icon('upload', 'ico-sm')} Impor Excel</button><button class="btn sm primary" data-act="addTx">${icon('plus', 'ico-sm')} Catat</button></div></div>
     ${groupedTx(list.slice(0, UIFin.limit))}
     ${list.length > UIFin.limit ? `<button class="btn" data-act="finMore">Tampilkan ${Math.min(150, list.length - UIFin.limit)} lagi</button>` : ''}
   </div>`;
@@ -1987,6 +1988,30 @@ Actions.receivePay = (el) => {
 Actions.forgive = (el) => {
   const a = Fin.acc(el.dataset.id); if (!a) return;
   Actions.addTx(null, null, { type: 'expense', amount: Fin.balance(a.id), accountId: a.id, desc: 'Direlakan: ' + a.name.replace(/^Di /, '') });
+};
+
+/* ---------- hapus banyak transaksi sekaligus ---------- */
+Actions.txSelMode = () => { UIFin.selMode = !UIFin.selMode; UIFin.sel.clear(); App.render(); };
+Actions.txSelAll = () => { const ids = filteredTx().map((t) => t.id); const all = ids.every((id) => UIFin.sel.has(id)); ids.forEach((id) => (all ? UIFin.sel.delete(id) : UIFin.sel.add(id))); App.render(); };
+document.addEventListener('change', (e) => {
+  const id = e.target.dataset && e.target.dataset.txsel; if (!id) return;
+  e.target.checked ? UIFin.sel.add(id) : UIFin.sel.delete(id);
+  const b = document.querySelector('[data-act=txDelSel]'); if (b) { b.disabled = !UIFin.sel.size; b.lastChild.textContent = ' Hapus ' + (UIFin.sel.size || ''); }
+});
+Actions.txDelSel = async () => {
+  const ids = Array.from(UIFin.sel); if (!ids.length) return;
+  const list = S().transactions.filter((t) => ids.includes(t.id));
+  const tot = sum(list.filter((t) => t.type === 'expense'), (t) => t.amount), inc = sum(list.filter((t) => t.type === 'income'), (t) => t.amount);
+  if (!(await ask(`Hapus <b>${list.length} transaksi</b> sekaligus?<br><span class="small muted">Pengeluaran ${rp(tot)} · pemasukan ${rp(inc)}. Saldo akun dihitung ulang; tagihan/belanja yang tertaut kembali terbuka.</span>`, { ok: 'Hapus ' + list.length + ' transaksi' }))) return;
+  const removed = clone(list);
+  Store.update((s) => {
+    const set = new Set(ids);
+    s.transactions = s.transactions.filter((t) => !set.has(t.id));
+    for (const p of s.planned) for (const k in p.paid || {}) if (set.has(p.paid[k])) delete p.paid[k];
+    for (const it of s.shopping) if (set.has(it.txId)) it.txId = '';
+  });
+  UIFin.sel.clear(); UIFin.selMode = false; App.render();
+  toast(list.length + ' transaksi dihapus', { ms: 8000, action: { label: 'Urungkan', fn: () => { removed.forEach(restoreTx); toast('Dikembalikan'); } } });
 };
 
 /* =========================================================
