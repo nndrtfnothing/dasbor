@@ -925,9 +925,10 @@ function pickFile(accept) {
    Kelompok akun: "spendable" (siap pakai) dan "savings" (tabungan) agar tidak dihitung ganda.
    ========================================================= */
 const Actions = {};
-const ACC_TYPES = [['cash', 'Uang tunai'], ['bank', 'Rekening bank'], ['ewallet', 'E-wallet'], ['savings', 'Tabungan khusus'], ['emergency', 'Dana darurat'], ['investment', 'Investasi'], ['other', 'Lainnya']];
+const ACC_TYPES = [['cash', 'Uang tunai'], ['bank', 'Rekening bank'], ['ewallet', 'E-wallet'], ['savings', 'Tabungan khusus'], ['emergency', 'Dana darurat'], ['investment', 'Investasi'], ['receivable', 'Uang di orang lain (piutang)'], ['other', 'Lainnya']];
 const accTypeName = (t) => (ACC_TYPES.find((x) => x[0] === t) || [, 'Lainnya'])[1];
-const defaultGroup = (t) => (['savings', 'emergency', 'investment'].includes(t) ? 'savings' : 'spendable');
+const defaultGroup = (t) => (t === 'receivable' ? 'receivable' : ['savings', 'emergency', 'investment'].includes(t) ? 'savings' : 'spendable');
+const GROUP_NAME = { spendable: 'Siap dibelanjakan', savings: 'Tabungan', receivable: 'Uang di orang lain' };
 const TX_TYPES = { income: 'Pemasukan', expense: 'Pengeluaran', transfer: 'Transfer' };
 
 const Fin = {
@@ -937,10 +938,10 @@ const Fin = {
   accOptions(sel, { empty = false, exclude } = {}) {
     const accs = S().accounts.filter((a) => (!a.archived || a.id === sel) && a.id !== exclude);
     return (empty ? `<option value="">— pilih akun —</option>` : '') +
-      ['spendable', 'savings'].map((g) => {
+      ['spendable', 'savings', 'receivable'].map((g) => {
         const list = accs.filter((a) => (a.group || defaultGroup(a.type)) === g);
         if (!list.length) return '';
-        return `<optgroup label="${g === 'spendable' ? 'Siap dibelanjakan' : 'Tabungan'}">${list.map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</optgroup>`;
+        return `<optgroup label="${GROUP_NAME[g]}">${list.map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</optgroup>`;
       }).join('');
   },
   group(accId) { const a = Fin.acc(accId); return a ? (a.group || defaultGroup(a.type)) : 'spendable'; },
@@ -969,8 +970,8 @@ const Fin = {
     return sum(S().accounts.filter((a) => (a.group || defaultGroup(a.type)) === group), (a) => Fin.balance(a.id, upTo));
   },
   totals(upTo = D.today()) {
-    const spendable = Fin.groupTotal('spendable', upTo), savings = Fin.groupTotal('savings', upTo);
-    return { spendable, savings, total: spendable + savings };
+    const spendable = Fin.groupTotal('spendable', upTo), savings = Fin.groupTotal('savings', upTo), receivable = Fin.groupTotal('receivable', upTo);
+    return { spendable, savings, receivable, total: spendable + savings + receivable };
   },
   /** transaksi pemasukan/pengeluaran nyata (bukan transfer, bukan penyesuaian saldo) */
   isFlow(t) { return (t.type === 'income' || t.type === 'expense') && !t.adjust; },
@@ -1049,8 +1050,8 @@ const Fin = {
       }
       if (t.type === 'transfer') {
         const gf = Fin.group(t.accountId), gt = Fin.group(t.toAccountId);
-        if (gf === 'spendable' && gt === 'savings') tOut += t.amount;
-        if (gf === 'savings' && gt === 'spendable') tIn += t.amount;
+        if (gf === 'spendable' && gt !== 'spendable') tOut += t.amount;
+        if (gf !== 'spendable' && gt === 'spendable') tIn += t.amount;
       }
     }
     // rencana yang belum terjadi (termasuk yang lewat jatuh tempo bulan ini tapi belum dibayar)
@@ -1232,7 +1233,7 @@ Actions.editAccount = (el) => {
     body: `<div class="form">
       ${F.text('name', 'Nama akun', a?.name || '', { af: true, ph: 'mis. BCA, GoPay, Dompet' })}
       ${F.select('type', 'Jenis akun', F.opts(ACC_TYPES, a?.type || 'bank'))}
-      ${F.select('group', 'Dihitung sebagai', F.opts([['spendable', 'Uang siap dibelanjakan'], ['savings', 'Tabungan / tidak untuk belanja']], a?.group || defaultGroup(a?.type || 'bank')), { help: 'Memisahkan aset likuid dan tabungan agar tidak dihitung ganda.' })}
+      ${F.select('group', 'Dihitung sebagai', F.opts([['spendable', 'Uang siap dibelanjakan'], ['savings', 'Tabungan / tidak untuk belanja'], ['receivable', 'Uang di orang lain (dipinjam/titip)']], a?.group || defaultGroup(a?.type || 'bank')), { help: 'Memisahkan aset likuid dan tabungan agar tidak dihitung ganda.' })}
       ${F.money('openingBalance', 'Saldo awal', a ? a.openingBalance : '')}
       ${F.date('openingDate', 'Tanggal saldo awal', a?.openingDate || D.today(), { help: 'Transaksi sebelum tanggal ini dianggap sudah termasuk dalam saldo awal.' })}
       ${F.area('note', 'Catatan (opsional)', a?.note || '', { rows: 2 })}
@@ -1285,7 +1286,7 @@ Fin.checkSummary = (c) => {
   if (!c) return null;
   const rows = Object.entries(c.values).map(([id, v]) => ({ id, name: Fin.accName(id), group: Fin.group(id), ...v, diff: v.actual - v.expected }));
   const part = (g) => { const r = rows.filter((x) => !g || x.group === g); return { expected: sum(r, (x) => x.expected), actual: sum(r, (x) => x.actual), diff: sum(r, (x) => x.diff) }; };
-  return { rows, spendable: part('spendable'), savings: part('savings'), total: part() };
+  return { rows, spendable: part('spendable'), savings: part('savings'), receivable: part('receivable'), total: part() };
 };
 Actions.checkBalances = () => {
   const accs = Fin.activeAccounts();
@@ -1294,7 +1295,7 @@ Actions.checkBalances = () => {
     title: 'Cek saldo aktual', wide: true,
     body: `<p class="small muted">Buka aplikasi bank/e-wallet dan hitung uang tunai, lalu isi saldo sebenarnya. Kolom "Seharusnya" adalah hasil hitungan dari saldo awal + transaksi yang Anda catat. Kosongkan akun yang tidak dicek.</p>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Akun</th><th class="r">Seharusnya</th><th>Aktual</th><th class="r">Selisih</th></tr></thead><tbody>
-    ${['spendable', 'savings'].map((g) => accs.filter((a) => Fin.group(a.id) === g).map((a) => `<tr><td>${esc(a.name)}<div class="xs muted">${g === 'savings' ? 'Tabungan' : 'Siap pakai'}</div></td><td class="r num">${rp(Fin.balance(a.id))}</td><td><div class="money"><input class="input" data-money inputmode="numeric" name="act_${a.id}" data-exp="${Fin.balance(a.id)}" placeholder="isi saldo"></div></td><td class="r num" data-diff="${a.id}">—</td></tr>`).join('')).join('')}
+    ${['spendable', 'savings', 'receivable'].map((g) => accs.filter((a) => Fin.group(a.id) === g).map((a) => `<tr><td>${esc(a.name)}<div class="xs muted">${GROUP_NAME[g]}</div></td><td class="r num">${rp(Fin.balance(a.id))}</td><td><div class="money"><input class="input" data-money inputmode="numeric" name="act_${a.id}" data-exp="${Fin.balance(a.id)}" placeholder="isi saldo"></div></td><td class="r num" data-diff="${a.id}">—</td></tr>`).join('')).join('')}
     <tr><td><b>Total</b></td><td class="r num"><b>${rp(sum(accs, (a) => Fin.balance(a.id)))}</b></td><td class="num" data-tot-act>—</td><td class="r num" data-tot-diff>—</td></tr>
     </tbody></table></div>`,
     submit: 'Simpan hasil cek',
@@ -1342,7 +1343,7 @@ function checkCard(compact) {
   const line = (l, p) => `<div class="ln"><span>${l}</span><span class="num">${rp(p.expected)} → <b>${rp(p.actual)}</b> <b class="${p.diff > 0 ? 'pos' : p.diff < 0 ? 'neg' : ''}">(${rp(p.diff, { sign: true })})</b></span></div>`;
   const stale = D.diff(c.date, D.today());
   return `<div class="card">${head}<p class="xs muted" style="margin-bottom:6px">Dicek ${D.fmt(c.date)}${stale > 7 ? ` · ${stale} hari lalu, sebaiknya cek ulang` : ''} · seharusnya → aktual (selisih)</p>
-    <div class="ledger">${sm.spendable.expected || sm.spendable.actual ? line('Uang siap pakai', sm.spendable) : ''}${sm.savings.expected || sm.savings.actual ? line('Tabungan', sm.savings) : ''}${line('<b>Total</b>', sm.total)}</div>
+    <div class="ledger">${sm.spendable.expected || sm.spendable.actual ? line('Uang siap pakai', sm.spendable) : ''}${sm.savings.expected || sm.savings.actual ? line('Tabungan', sm.savings) : ''}${sm.receivable.expected || sm.receivable.actual ? line('Uang di orang lain', sm.receivable) : ''}${line('<b>Total</b>', sm.total)}</div>
     ${compact ? '' : `<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Akun</th><th class="r">Seharusnya</th><th class="r">Aktual</th><th class="r">Selisih</th></tr></thead><tbody>${sm.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="r num">${rp(r.expected)}</td><td class="r num">${rp(r.actual)}</td><td class="r num ${r.diff > 0 ? 'pos' : r.diff < 0 ? 'neg' : ''}">${rp(r.diff, { sign: true })}</td></tr>`).join('')}</tbody></table></div>
     ${sm.total.diff ? `<p class="xs muted" style="margin-top:8px">Selisih negatif biasanya berarti ada pengeluaran yang belum dicatat. <button class="btn sm ghost" data-act="addTx">Catat yang terlewat</button><button class="btn sm ghost" data-act="applyCheck">Sesuaikan ke aktual</button></p>` : ''}`}</div>`;
 }
@@ -1352,12 +1353,12 @@ function checkCard(compact) {
 Fin.freeSavings = () => {
   const sp = S().settings.savePlan || { reserved: [], dailyA: 0, dailyMax: 0 };
   const today = D.today(), key = D.month(today);
-  const total = Fin.totals().total;
+  const tt = Fin.totals(); const total = tt.spendable + tt.savings, receivable = tt.receivable;
   const reserved = sum(sp.reserved || [], (r) => r.amount);
   const bills = sum(Fin.plannedOcc(today < D.monthStart(key) ? today : D.monthStart(key), D.monthEnd(key)).filter((o) => o.p.type === 'expense' && o.status !== 'skip'), (o) => o.p.amount);
   const days = D.daysIn(key) - Number(today.slice(8)) + 1; // termasuk hari ini
   const after = total - reserved - bills;
-  return { sp, total, reserved, bills, days, after, planA: after - days * (sp.dailyA || 0), planMax: after - days * (sp.dailyMax || 0) };
+  return { sp, total, receivable, reserved, bills, days, after, planA: after - days * (sp.dailyA || 0), planMax: after - days * (sp.dailyMax || 0) };
 };
 Actions.editSavePlan = () => {
   const sp = S().settings.savePlan || { reserved: [{ name: 'Tabungan semester / UKT', amount: 4500000 }], dailyA: 40000, dailyMax: 60000 };
@@ -1382,7 +1383,7 @@ function freeSavingsCard() {
   const neg = (v) => (v < 0 ? 'neg' : 'pos');
   return `<div class="card"><div class="card-h"><h3>Tabungan bebas bulan ini</h3><button class="btn sm" data-act="editSavePlan">Ubah</button></div>
   <div class="ledger">
-    <div class="ln"><span>Total uang (semua akun, tercatat)</span><b class="num">${rp(f.total)}</b></div>
+    <div class="ln"><span>Total uang di tangan (semua akun, tercatat)</span><b class="num">${rp(f.total)}</b></div>${f.receivable ? `<div class="ln"><span class="muted">(belum termasuk uang di orang lain ${rp(f.receivable)})</span><span></span></div>` : ''}
     ${(f.sp.reserved || []).map((r) => `<div class="ln"><span><span class="op">−</span>${esc(r.name)}</span><b class="num">${rp(r.amount)}</b></div>`).join('')}
     ${f.bills ? `<div class="ln"><span><span class="op">−</span>Tagihan bulan ini belum dibayar</span><b class="num">${rp(f.bills)}</b></div>` : ''}
     <div class="ln" style="font-weight:650"><span>= Uang setelah dikurangi</span><b class="num">${rp(f.after)}</b></div>
@@ -1561,7 +1562,7 @@ function accountsBand() {
     <div class="stat"><span class="label">Total aset</span><span class="v lg num">${rp(t.total)}</span><span class="hint">${S().accounts.length} akun · per ${D.fmt(D.today())}</span></div>
     <div class="stat"><span class="label">Siap dibelanjakan</span><span class="v num">${rp(t.spendable)}</span><span class="hint">tunai, bank, e-wallet</span></div>
     <div class="stat"><span class="label">Tabungan</span><span class="v num">${rp(t.savings)}</span><span class="hint">tabungan, darurat, investasi</span></div>
-    <div class="stat"><span class="label">Dialokasikan ke target</span><span class="v num">${rp(sum(S().goals, Fin.goalAllocated))}</span><span class="hint">${S().goals.length} target</span></div>
+    <div class="stat"><span class="label">Uang di orang lain</span><span class="v num">${rp(t.receivable)}</span><span class="hint">piutang, belum kembali</span></div>
   </div>`;
 }
 
@@ -1695,7 +1696,7 @@ function finAccounts(el) {
       <div class="row between"><span class="pill ${g === 'savings' ? 'accent' : ''}">${accTypeName(a.type)}</span>${a.archived ? '<span class="pill">Diarsipkan</span>' : ''}${demoTag(a)}</div>
       <div><div class="t" style="font-weight:650">${esc(a.name)}</div><div class="bal num ${bal < 0 ? 'neg' : ''}">${rp(bal)}</div></div>
       <div class="xs muted">Saldo awal ${rp(a.openingBalance)} · ${D.fmt(a.openingDate)}<br>Diperbarui ${D.fmt(Fin.lastUpdated(a.id))}${a.note ? '<br>' + esc(a.note) : ''}</div>
-      <div class="row"><button class="btn sm" data-act="editAccount" data-id="${a.id}">Ubah</button><button class="btn sm ghost" data-act="reconcile" data-id="${a.id}">Sesuaikan saldo</button></div>
+      <div class="row">${g === 'receivable' ? `${bal > 0 ? `<button class="btn sm primary" data-act="receivePay" data-id="${a.id}">Terima pembayaran</button><button class="btn sm ghost" data-act="forgive" data-id="${a.id}">Relakan</button>` : '<span class="pill good">Lunas</span>'}<button class="btn sm ghost" data-act="editAccount" data-id="${a.id}">Ubah</button>` : `<button class="btn sm" data-act="editAccount" data-id="${a.id}">Ubah</button><button class="btn sm ghost" data-act="reconcile" data-id="${a.id}">Sesuaikan saldo</button>`}</div>
     </div>`;
   };
   const grp = (g) => accs.filter((a) => (a.group || defaultGroup(a.type)) === g);
@@ -1704,7 +1705,10 @@ function finAccounts(el) {
   <div class="row between"><p class="small muted" style="max-width:68ch">Saldo dihitung otomatis: saldo awal + semua transaksi sejak tanggal saldo awal. Transfer hanya memindahkan saldo antarakun.</p>
   <div class="row"><button class="btn" data-act="addTx" data-type="transfer">${icon('swap', 'ico-sm')} Transfer</button><button class="btn primary" data-act="editAccount">${icon('plus', 'ico-sm')} Tambah akun</button></div></div>
   ${accs.length ? `<div class="stack"><h3>Siap dibelanjakan</h3>${grp('spendable').length ? `<div class="acc-grid">${grp('spendable').map(card).join('')}</div>` : '<p class="small muted">Belum ada.</p>'}
-  <h3 style="margin-top:8px">Tabungan</h3>${grp('savings').length ? `<div class="acc-grid">${grp('savings').map(card).join('')}</div>` : '<p class="small muted">Belum ada akun tabungan.</p>'}</div>`
+  <h3 style="margin-top:8px">Tabungan</h3>${grp('savings').length ? `<div class="acc-grid">${grp('savings').map(card).join('')}</div>` : '<p class="small muted">Belum ada akun tabungan.</p>'}
+  <div class="row between" style="margin-top:8px"><h3>Uang di orang lain</h3><button class="btn sm" data-act="addReceivable">${icon('plus', 'ico-sm')} Catat piutang</button></div>
+  ${grp('receivable').length ? `<div class="acc-grid">${grp('receivable').map(card).join('')}</div>` : '<p class="small muted">Belum ada. Contoh: uang yang dipinjam Anna, ditalangi untuk Ayah, atau patungan pizza yang belum diganti.</p>'}
+  <p class="xs muted">Saat ada yang meminjam: catat <b>Transfer</b> dari rekening Anda ke akun piutangnya. Saat dikembalikan: <b>Transfer</b> dari akun piutang ke rekening penerima. Kalau direlakan: catat <b>Pengeluaran</b> dari akun piutang.</p></div>`
     : `<div class="card">${empty('wallet', 'Belum ada sumber dana', 'Tambahkan uang tunai, rekening bank, e-wallet, atau tabungan beserta saldo awalnya.', `<button class="btn primary" data-act="editAccount">Tambah akun</button>`)}</div>`}`;
 }
 
@@ -1744,7 +1748,7 @@ function finProjection(el) {
         <div class="ln"><span>Saldo awal bulan (${D.fmt(D.add(D.monthStart(key), -1))})</span><b class="num">${rp(pr.start.spendable)}</b></div>
         <div class="ln"><span><span class="op">+</span>Pemasukan diterima</span><b class="num pos">${rp(pr.inc)}</b></div>
         <div class="ln"><span><span class="op">−</span>Pengeluaran terjadi</span><b class="num neg">${rp(pr.exp)}</b></div>
-        ${pr.tOut || pr.tIn ? `<div class="ln"><span><span class="op">±</span>Transfer bersih ke tabungan</span><b class="num">${rp(pr.tIn - pr.tOut, { sign: true })}</b></div>` : ''}
+        ${pr.tOut || pr.tIn ? `<div class="ln"><span><span class="op">±</span>Transfer bersih ke tabungan/piutang</span><b class="num">${rp(pr.tIn - pr.tOut, { sign: true })}</b></div>` : ''}
         ${pr.adj ? `<div class="ln"><span><span class="op">±</span>Penyesuaian saldo</span><b class="num">${rp(pr.adj, { sign: true })}</b></div>` : ''}
         <div class="ln" style="font-weight:650"><span>= Saldo saat ini</span><b class="num">${rp(pr.now.spendable)}</b></div>
         <div class="ln"><span><span class="op">+</span>Pemasukan diharapkan (belum diterima)</span><b class="num pos">${rp(pr.pe.inc + pr.pe.fromSav)}</b></div>
@@ -1924,6 +1928,46 @@ function drawGoalChart(g) {
   const labels = pts.map((p) => D.short(p.x));
   mkChart('chGoal_' + g.id, { type: 'line', data: { labels, datasets: [{ label: 'Terkumpul', data: pts.map((p) => p.y), borderColor: cssVar('--accent'), backgroundColor: 'transparent', tension: 0.25, pointRadius: 3, stepped: false }, { label: 'Target', data: pts.map(() => g.target), borderColor: cssVar('--faint'), borderDash: [5, 5], pointRadius: 0 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (x) => ' ' + x.dataset.label + ': ' + rp(x.parsed.y) } } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { callback: (v) => rpShort(v) } } } } });
 }
+
+/* ---------- piutang: uang Anda yang sedang dipegang orang lain ---------- */
+Actions.addReceivable = () => {
+  Modal.open({
+    title: 'Catat uang di orang lain',
+    body: `<p class="small muted">Dibuat sebagai akun "Uang di orang lain" atas nama orang tersebut. Nominalnya tetap milik Anda (masuk total aset), tapi tidak dihitung sebagai uang siap pakai atau tabungan.</p>
+    <div class="form">${F.text('who', 'Siapa / untuk apa', '', { af: true, ph: 'mis. Anna, Ayah, Pizza + seklek' })}${F.money('amount', 'Jumlah yang belum kembali', '')}
+    ${F.select('mode', 'Uangnya', F.opts([['opening', 'Sudah dipinjam sebelumnya (saldo rekening saya sudah berkurang)'], ['transfer', 'Baru saja saya pinjamkan dari rekening …']], 'opening'), { full: true })}
+    <div class="field full" data-from hidden><label for="f_from">Dari rekening</label><select class="input" id="f_from" name="from">${Fin.accOptions(S().settings.lastAccountId, { empty: true })}</select></div>
+    ${F.text('note', 'Catatan', '', { full: true, ph: 'mis. talangan tiket, dibayar akhir bulan' })}</div>`,
+    onOpen: (form) => { const m = form.querySelector('[name=mode]'); m.onchange = () => (form.querySelector('[data-from]').hidden = m.value !== 'transfer'); },
+    onSubmit: (d, form) => {
+      if (!d.who) return fieldError(form, 'who', 'Isi nama orangnya.');
+      const amt = parseAmount(d.amount); if (!(amt > 0)) return fieldError(form, 'amount', 'Isi jumlahnya.');
+      if (d.mode === 'transfer' && !d.from) return fieldError(form, 'from', 'Pilih rekening asal.');
+      const name = 'Di ' + d.who;
+      Store.update((s) => {
+        let acc = s.accounts.find((a) => a.name.toLowerCase() === name.toLowerCase() && !a.archived);
+        if (!acc) { acc = { id: uid('a'), name, type: 'receivable', group: 'receivable', openingBalance: d.mode === 'opening' ? amt : 0, openingDate: D.today(), note: d.note, createdAt: Date.now() }; s.accounts.push(acc); }
+        else if (d.mode === 'opening') acc.openingBalance = (Number(acc.openingBalance) || 0) + amt;
+        if (d.mode === 'transfer') s.transactions.push({ id: uid('t'), date: D.today(), type: 'transfer', amount: amt, categoryId: '', accountId: d.from, toAccountId: acc.id, desc: 'Dipinjamkan ke ' + d.who, note: d.note, createdAt: Date.now() });
+      });
+      toast(`${rp(amt)} dicatat di ${d.who}`);
+    },
+  });
+};
+
+/** orang membayar kembali: transfer dari akun piutang ke rekening penerima (bukan pemasukan) */
+Actions.receivePay = (el) => {
+  const a = Fin.acc(el.dataset.id); if (!a) return;
+  const bal = Fin.balance(a.id);
+  const to = S().accounts.find((x) => x.id === S().settings.lastAccountId && Fin.group(x.id) === 'spendable') || S().accounts.find((x) => Fin.group(x.id) === 'spendable' && !x.archived);
+  Actions.addTx(null, null, { type: 'transfer', amount: bal, accountId: a.id, toAccountId: to ? to.id : '', desc: a.name.replace(/^Di /, '') + ' bayar' });
+  toast('Sisa ' + rp(bal) + '. Ubah nominal bila baru dibayar sebagian.', { ms: 6000 });
+};
+/** tidak dikembalikan: baru dihitung sebagai pengeluaran */
+Actions.forgive = (el) => {
+  const a = Fin.acc(el.dataset.id); if (!a) return;
+  Actions.addTx(null, null, { type: 'expense', amount: Fin.balance(a.id), accountId: a.id, desc: 'Direlakan: ' + a.name.replace(/^Di /, '') });
+};
 
 /* =========================================================
    TASKS ENGINE — satu daftar tugas dipakai Planner, Kalender, Proyek, Rumah
@@ -2862,7 +2906,7 @@ function renderDashboard(root) {
   </div>
   ${noFin ? `<div class="card flat">${empty('wallet', 'Keuangan belum diatur', 'Tambahkan akun (tunai, bank, e-wallet, tabungan) dan saldo awalnya agar ringkasan keuangan terisi.', `<button class="btn primary" data-act="editAccount">Tambah akun</button>`)}</div>` : `
   <div class="stats-band">
-    <div class="stat"><span class="label">Aset likuid (siap pakai)</span><span class="v lg num">${rp(totals.spendable)}</span><span class="hint">Total aset ${rp(totals.total)}</span></div>
+    <div class="stat"><span class="label">Aset likuid (siap pakai)</span><span class="v lg num">${rp(totals.spendable)}</span><span class="hint">Total aset ${rp(totals.total)}${totals.receivable ? ` · ${rp(totals.receivable)} di orang lain` : ''}</span></div>
     <div class="stat"><span class="label">Tabungan</span><span class="v num">${rp(totals.savings)}</span><span class="hint">${s.goals.length ? rp(sum(s.goals, Fin.goalAllocated)) + ' dialokasikan ke target' : 'belum ada target'}</span></div>
     <div class="stat"><span class="label">Pemasukan bulan ini</span><span class="v num pos">${rp(flows.inc)}</span><span class="hint">${D.monthName(key)}</span></div>
     <div class="stat"><span class="label">Pengeluaran bulan ini</span><span class="v num neg">${rp(flows.exp)}</span><span class="hint">selisih ${rp(flows.net, { sign: true })}</span></div>
