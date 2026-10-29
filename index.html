@@ -428,6 +428,11 @@ h1,h2,h3,h4{font-weight:600;letter-spacing:-.015em}
 .fab{border-radius:18px;box-shadow:0 10px 24px -8px var(--accent)}
 @media (max-width:860px){.stats-band>div{border-left:0!important}}
 
+.brk{display:flex;flex-direction:column;gap:3px;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.22);font-size:12.5px}
+.brk>div{display:flex;justify-content:space-between;gap:10px;min-width:0}
+.brk span{color:rgba(255,255,255,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brk b{color:#fff;font-weight:600}
+
 </style>
 <script>
 /* pustaka pihak ketiga dimuat dengan sumber cadangan; aplikasi tetap jalan tanpa keduanya */
@@ -1353,12 +1358,13 @@ function checkCard(compact) {
 Fin.freeSavings = () => {
   const sp = S().settings.savePlan || { reserved: [], dailyA: 0, dailyMax: 0 };
   const today = D.today(), key = D.month(today);
-  const tt = Fin.totals(); const total = tt.spendable + tt.savings, receivable = tt.receivable;
+  const tt = Fin.totals(); const total = tt.total, receivable = tt.receivable; // termasuk uang di orang lain
   const reserved = sum(sp.reserved || [], (r) => r.amount);
   const bills = sum(Fin.plannedOcc(today < D.monthStart(key) ? today : D.monthStart(key), D.monthEnd(key)).filter((o) => o.p.type === 'expense' && o.status !== 'skip'), (o) => o.p.amount);
   const days = D.daysIn(key) - Number(today.slice(8)) + 1; // termasuk hari ini
   const after = total - reserved - bills;
-  return { sp, total, receivable, reserved, bills, days, after, planA: after - days * (sp.dailyA || 0), planMax: after - days * (sp.dailyMax || 0) };
+  const daily = sp.dailyMax || sp.dailyA || 0; // pakai jatah paling longgar agar tidak kebablasan
+  return { sp, total, receivable, reserved, bills, days, after, daily, main: after - days * daily, planA: after - days * (sp.dailyA || 0), planMax: after - days * (sp.dailyMax || 0) };
 };
 Actions.editSavePlan = () => {
   const sp = S().settings.savePlan || { reserved: [{ name: 'Tabungan semester / UKT', amount: 4500000 }], dailyA: 40000, dailyMax: 60000 };
@@ -1383,7 +1389,7 @@ function freeSavingsCard() {
   const neg = (v) => (v < 0 ? 'neg' : 'pos');
   return `<div class="card"><div class="card-h"><h3>Tabungan bebas bulan ini</h3><button class="btn sm" data-act="editSavePlan">Ubah</button></div>
   <div class="ledger">
-    <div class="ln"><span>Total uang di tangan (semua akun, tercatat)</span><b class="num">${rp(f.total)}</b></div>${f.receivable ? `<div class="ln"><span class="muted">(belum termasuk uang di orang lain ${rp(f.receivable)})</span><span></span></div>` : ''}
+    <div class="ln"><span>Total uang (semua akun${f.receivable ? `, termasuk ${rp(f.receivable)} di orang lain` : ''})</span><b class="num">${rp(f.total)}</b></div>
     ${(f.sp.reserved || []).map((r) => `<div class="ln"><span><span class="op">−</span>${esc(r.name)}</span><b class="num">${rp(r.amount)}</b></div>`).join('')}
     ${f.bills ? `<div class="ln"><span><span class="op">−</span>Tagihan bulan ini belum dibayar</span><b class="num">${rp(f.bills)}</b></div>` : ''}
     <div class="ln" style="font-weight:650"><span>= Uang setelah dikurangi</span><b class="num">${rp(f.after)}</b></div>
@@ -1556,13 +1562,27 @@ function renderFinance(root) {
   ({ ringkasan: finSummary, transaksi: finTransactions, akun: finAccounts, budget: finBudget, proyeksi: finProjection, tagihan: finPlanned, target: finGoals, laporan: finReports }[UIFin.tab] || finSummary)(body);
 }
 
+/** rincian saldo per akun dalam satu kelompok, untuk ditampilkan di kartu ringkasan */
+function accBreakdown(group, max = 6) {
+  const list = S().accounts.filter((a) => !a.archived && Fin.group(a.id) === group).map((a) => ({ a, b: Fin.balance(a.id) })).sort((x, y) => y.b - x.b);
+  if (!list.length) return '';
+  const shown = list.slice(0, max), rest = list.slice(max);
+  return `<div class="brk">${shown.map((x) => `<div><span>${esc(x.a.name)}</span><b class="num">${rp(x.b)}</b></div>`).join('')}${rest.length ? `<div><span>+${rest.length} akun lain</span><b class="num">${rp(sum(rest, (x) => x.b))}</b></div>` : ''}</div>`;
+}
+/** kotak "Tabungan" di kartu biru: total uang − dana cadangan − tagihan − biaya harian s.d. akhir bulan */
+function savingsStat(lg) {
+  const f = Fin.freeSavings();
+  if (!S().settings.savePlan) return `<div class="stat"><span class="label">Tabungan</span><span class="v num">${rp(Fin.totals().savings)}</span><span class="hint">akun tabungan · <button class="btn sm ghost" style="color:#fff;padding:0;text-decoration:underline" data-act="editSavePlan">atur rumus UKT & biaya harian</button></span>${accBreakdown('savings')}</div>`;
+  return `<div class="stat"><span class="label">Tabungan</span><span class="v num ${lg ? 'lg' : ''}">${rp(f.main)}</span><span class="hint">setelah dana cadangan & biaya ${f.days} hari</span>
+    <div class="brk"><div><span>Total uang</span><b class="num">${rp(f.total)}</b></div>${(f.sp.reserved || []).map((r) => `<div><span>− ${esc(r.name)}</span><b class="num">${rp(r.amount)}</b></div>`).join('')}${f.bills ? `<div><span>− Tagihan bulan ini</span><b class="num">${rp(f.bills)}</b></div>` : ''}<div><span>− ${f.days} hari × ${rp(f.daily)}</span><b class="num">${rp(f.days * f.daily)}</b></div></div></div>`;
+}
 function accountsBand() {
   const t = Fin.totals();
   return `<div class="stats-band">
     <div class="stat"><span class="label">Total aset</span><span class="v lg num">${rp(t.total)}</span><span class="hint">${S().accounts.length} akun · per ${D.fmt(D.today())}</span></div>
-    <div class="stat"><span class="label">Siap dibelanjakan</span><span class="v num">${rp(t.spendable)}</span><span class="hint">tunai, bank, e-wallet</span></div>
-    <div class="stat"><span class="label">Tabungan</span><span class="v num">${rp(t.savings)}</span><span class="hint">tabungan, darurat, investasi</span></div>
-    <div class="stat"><span class="label">Uang di orang lain</span><span class="v num">${rp(t.receivable)}</span><span class="hint">piutang, belum kembali</span></div>
+    <div class="stat"><span class="label">Siap dibelanjakan</span><span class="v num">${rp(t.spendable)}</span>${accBreakdown('spendable') || '<span class="hint">tunai, bank, e-wallet</span>'}</div>
+    ${savingsStat()}
+    <div class="stat"><span class="label">Uang di orang lain</span><span class="v num">${rp(t.receivable)}</span>${accBreakdown('receivable') || '<span class="hint">piutang, belum kembali</span>'}</div>
   </div>`;
 }
 
@@ -2906,8 +2926,8 @@ function renderDashboard(root) {
   </div>
   ${noFin ? `<div class="card flat">${empty('wallet', 'Keuangan belum diatur', 'Tambahkan akun (tunai, bank, e-wallet, tabungan) dan saldo awalnya agar ringkasan keuangan terisi.', `<button class="btn primary" data-act="editAccount">Tambah akun</button>`)}</div>` : `
   <div class="stats-band">
-    <div class="stat"><span class="label">Aset likuid (siap pakai)</span><span class="v lg num">${rp(totals.spendable)}</span><span class="hint">Total aset ${rp(totals.total)}${totals.receivable ? ` · ${rp(totals.receivable)} di orang lain` : ''}</span></div>
-    <div class="stat"><span class="label">Tabungan</span><span class="v num">${rp(totals.savings)}</span><span class="hint">${s.goals.length ? rp(sum(s.goals, Fin.goalAllocated)) + ' dialokasikan ke target' : 'belum ada target'}</span></div>
+    <div class="stat"><span class="label">Aset likuid (siap pakai)</span><span class="v lg num">${rp(totals.spendable)}</span><span class="hint">Total aset ${rp(totals.total)}${totals.receivable ? ` · ${rp(totals.receivable)} di orang lain` : ''}</span>${accBreakdown('spendable')}</div>
+    ${savingsStat()}
     <div class="stat"><span class="label">Pemasukan bulan ini</span><span class="v num pos">${rp(flows.inc)}</span><span class="hint">${D.monthName(key)}</span></div>
     <div class="stat"><span class="label">Pengeluaran bulan ini</span><span class="v num neg">${rp(flows.exp)}</span><span class="hint">selisih ${rp(flows.net, { sign: true })}</span></div>
   </div>
